@@ -1,13 +1,25 @@
 import time
-from flask import Flask, render_template, request, redirect, url_for, send_from_directory
+from flask import Flask, render_template, request, redirect, url_for, send_from_directory, jsonify, send_file
 import os
 from PIL import Image
 import numpy as np
 import requests
+from lecture_packet_engine import LecturePacketEngine
+from eeg_ml_pipeline import start_eeg_monitoring, stop_eeg_monitoring, get_current_state
+import logging
+from datetime import datetime
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 UPLOAD_FOLDER = 'generated_videos'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+engine = LecturePacketEngine()
+
+# Start EEG monitoring when the app starts
+start_eeg_monitoring()
 
 def create_placeholder_image(path, size=(800, 600)):
     """Create a simple placeholder image if the original is not available"""
@@ -105,6 +117,63 @@ def result(filename):
 @app.route('/download/<filename>')
 def download(filename):
     return send_from_directory(UPLOAD_FOLDER, filename, as_attachment=True)
+
+@app.route('/generate', methods=['POST'])
+def generate_packet():
+    try:
+        data = request.get_json()
+        if not data or 'topic' not in data:
+            return jsonify({'error': 'Topic is required'}), 400
+            
+        topic = data['topic']
+        logger.info(f"Generating packet for topic: {topic}")
+        
+        # Generate the packet
+        packet_path = engine.generate_packet(topic)
+        
+        if not packet_path:
+            return jsonify({'error': 'Failed to generate packet'}), 500
+            
+        return jsonify({
+            'message': 'Packet generated successfully',
+            'path': packet_path,
+            'cognitive_state': get_current_state()
+        })
+        
+    except Exception as e:
+        logger.error(f"Error generating packet: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/state', methods=['GET'])
+def get_cognitive_state():
+    """Get the current cognitive state."""
+    try:
+        state = get_current_state()
+        return jsonify({
+            'state': state,
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Error getting cognitive state: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/download/<path:filename>')
+def download_file(filename):
+    """Download a generated PDF file."""
+    try:
+        return send_file(
+            filename,
+            as_attachment=True,
+            download_name=os.path.basename(filename)
+        )
+    except Exception as e:
+        logger.error(f"Error downloading file: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.teardown_appcontext
+def cleanup(exception=None):
+    """Cleanup when the app context is torn down."""
+    stop_eeg_monitoring()
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5002, debug=True) 

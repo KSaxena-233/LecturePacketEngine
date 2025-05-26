@@ -19,6 +19,7 @@ import tempfile
 from duckduckgo_search import ddg_images
 import time
 from io import BytesIO
+from eeg_ml_pipeline import get_current_state
 
 # Constants
 GEMINI_API_KEY = "AIzaSyDcfF_sos6xfCfgiIyokWGEVOqYTfsgLgk"
@@ -89,45 +90,69 @@ class LecturePacketEngine:
             if style_name not in self.styles:
                 self.styles.add(style)
 
-    def generate_content(self, prompt: str) -> Optional[Dict]:
-        """Generate educational content using Gemini API"""
-        headers = {'Content-Type': 'application/json'}
-        data = {
-            "contents": [{"parts": [{"text": self._create_prompt(prompt)}]}]
-        }
-        
+    def generate_content(self, subject_topic: str) -> Dict:
+        """Generate lecture packet content with EEG state personalization."""
         try:
-            print("Sending request to Gemini API...")
-            response = requests.post(
-                f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
-                headers=headers,
-                json=data
-            )
-            response.raise_for_status()
-            response_data = response.json()
-            print("\nRaw API Response:")
-            print(json.dumps(response_data, indent=2))
+            # Get current cognitive state
+            cognitive_state = get_current_state()
             
-            if 'candidates' in response_data and response_data['candidates']:
-                content_text = response_data['candidates'][0]['content']['parts'][0]['text']
-                print("\nExtracted Content Text:")
-                print(content_text)
+            # Adjust content generation based on cognitive state
+            if cognitive_state == "confused":
+                # Generate simpler, more visual content
+                prompt = f"""Create a simplified lecture packet about {subject_topic} with:
+                - More diagrams and visual aids
+                - Simpler explanations
+                - More analogies and examples
+                - Step-by-step breakdowns
+                - Practice questions with detailed solutions"""
                 
-                # Extract JSON from the response text
-                json_match = re.search(r'\{.*\}', content_text, re.DOTALL)
-                if json_match:
-                    json_str = json_match.group()
-                    print("\nExtracted JSON:")
-                    print(json_str)
-                    return json.loads(json_str)
-                else:
-                    print("\nNo JSON found in response text")
-            else:
-                print("\nNo candidates in response")
-            return None
+            elif cognitive_state == "engaged":
+                # Generate more challenging content
+                prompt = f"""Create an advanced lecture packet about {subject_topic} with:
+                - Deeper theoretical concepts
+                - Challenging practice problems
+                - Extension topics
+                - Critical thinking questions
+                - Research connections"""
+                
+            elif cognitive_state == "fatigued":
+                # Generate more digestible content
+                prompt = f"""Create a concise lecture packet about {subject_topic} with:
+                - Key points only
+                - Visual summaries
+                - Memory aids and mnemonics
+                - Quick practice exercises
+                - Clear structure and spacing"""
+                
+            else:  # neutral or unknown state
+                prompt = f"""Create a comprehensive lecture packet about {subject_topic} with:
+                - Clear explanations
+                - Relevant examples
+                - Practice problems
+                - Visual aids where helpful
+                - Summary and review questions"""
+
+            # Generate content using the state-appropriate prompt
+            response = self.model.generate_content(prompt)
+            
+            if not response or not response.text:
+                raise ValueError("No content generated from the model")
+            
+            # Parse the response into sections
+            content = self._parse_content(response.text)
+            
+            # Add cognitive state metadata
+            content['metadata'] = {
+                'cognitive_state': cognitive_state,
+                'generation_timestamp': datetime.now().isoformat(),
+                'topic': subject_topic
+            }
+            
+            return content
+            
         except Exception as e:
-            print(f"Error generating content: {e}")
-            return None
+            logger.error(f"Error generating content: {str(e)}")
+            raise
 
     def _create_prompt(self, topic: str) -> str:
         """Create a detailed prompt for Gemini"""
