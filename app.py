@@ -144,17 +144,51 @@ def generate_packet():
         logger.error(f"Error generating packet: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/state', methods=['GET'])
+@app.route('/cognitive_state', methods=['GET'])
 def get_cognitive_state():
-    """Get the current cognitive state."""
+    """Get the current cognitive state and focus level."""
     try:
         state = get_current_state()
+        
+        # Calculate focus level based on attention and meditation
+        readings = global_state.buffer.get_window()
+        if readings:
+            attention = np.mean([r['attention'] for r in readings])
+            meditation = np.mean([r['meditation'] for r in readings])
+            focus_level = (attention + meditation) / 2
+        else:
+            focus_level = 0
+            
         return jsonify({
             'state': state,
+            'focus_level': focus_level,
             'timestamp': datetime.now().isoformat()
         })
     except Exception as e:
         logger.error(f"Error getting cognitive state: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/cognitive_history', methods=['GET'])
+def get_cognitive_history():
+    """Get the cognitive state history."""
+    try:
+        readings = global_state.buffer.get_window()
+        history = []
+        
+        for reading in readings:
+            attention = reading['attention']
+            meditation = reading['meditation']
+            focus_level = (attention + meditation) / 2
+            
+            history.append({
+                'timestamp': reading['timestamp'],
+                'state': global_state.analyzer.analyze_state([reading]),
+                'focus_level': focus_level
+            })
+            
+        return jsonify(history)
+    except Exception as e:
+        logger.error(f"Error getting cognitive history: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/download/<path:filename>')

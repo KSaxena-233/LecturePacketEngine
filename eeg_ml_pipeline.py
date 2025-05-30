@@ -7,6 +7,7 @@ from typing import Dict, List, Optional
 import threading
 from queue import Queue
 import logging
+from eeg_ml_classifier import EEGMLClassifier, EEGDataLogger
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -86,6 +87,8 @@ class EEGStateAnalyzer:
             buffer: EEGDataBuffer instance to analyze
         """
         self.buffer = buffer
+        self.classifier = EEGMLClassifier()
+        self.logger = EEGDataLogger()
         
     def analyze_state(self) -> str:
         """Analyze current EEG state and return cognitive state label."""
@@ -93,19 +96,26 @@ class EEGStateAnalyzer:
         if not readings:
             return "unknown"
             
-        # Calculate average attention and meditation
-        avg_attention = np.mean([r["attention"] for r in readings])
-        avg_meditation = np.mean([r["meditation"] for r in readings])
+        # Get ML-based prediction
+        state = self.classifier.predict(readings)
         
-        # Simple rule-based state classification
-        if avg_attention < 30:
-            return "fatigued"
-        elif avg_attention > 70 and avg_meditation > 60:
-            return "engaged"
-        elif avg_attention < 50:
-            return "confused"
+        # Log the reading and state
+        self.logger.log_reading(
+            reading=readings[-1],  # Log the most recent reading
+            state=state,
+            content_type="lecture_packet"  # This should be updated based on actual content
+        )
+        
+        return state
+        
+    def train_model(self):
+        """Train the ML model using logged data."""
+        training_data, labels = self.logger.get_training_data()
+        if training_data and labels:
+            self.classifier.train(training_data, labels)
+            logger.info("Model trained successfully")
         else:
-            return "neutral"
+            logger.warning("No training data available")
 
 # Global state context
 class GlobalState:
